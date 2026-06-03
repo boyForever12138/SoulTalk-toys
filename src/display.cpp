@@ -41,13 +41,30 @@ namespace display_ui {
 void begin() {
   // U8g2 HW_I2C constructor calls Wire.begin() internally.
   // Configure pins BEFORE that so U8g2 uses the correct I2C bus.
+  Serial.println("[display] setPins...");
+  Serial.flush();
   Wire.setPins(PIN_I2C_SDA, PIN_I2C_SCL);
+
+  Serial.println("[display] u8g2.begin()...");
+  Serial.flush();
   u8g2.begin();
+
+  Serial.println("[display] setBusClock...");
+  Serial.flush();
   u8g2.setBusClock(400000);
+
+  Serial.println("[display] setFont...");
+  Serial.flush();
   u8g2.setFont(u8g2_font_6x10_tf);
+
   setLine(0, "SoulTalk Toy");
   setLine(1, "Booting...");
+
+  Serial.println("[display] first render...");
+  Serial.flush();
   render();
+  Serial.println("[display] begin() done");
+  Serial.flush();
 }
 
 void setState(State s) {
