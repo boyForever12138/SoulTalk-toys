@@ -190,8 +190,13 @@ void streamOneFrame() {
 }  // namespace
 
 void setup() {
+  // Initialize serial output
+  // With ARDUINO_USB_CDC_ON_BOOT=0: Serial uses UART0 (TX=GPIO43, RX=GPIO44)
+  // This works with USB-to-UART bridge chips (CP2102/CH340) commonly on DevKit
+  // boards
   Serial.begin(115200);
-  delay(500);  // give USB CDC more time to enumerate
+  delay(500);
+
   Serial.println("\n[soultalk-toys] boot");
   Serial.flush();
 
@@ -318,11 +323,18 @@ void setup() {
       delay(PAIR_POLL_INTERVAL_MS);
       button::Event ev = button::poll();
       if (ev == button::Event::LongPress) {
+        // Long press during pairing: refresh pair code (it may have expired)
+        // Do NOT clear WiFi config - user should not have to re-enter WiFi
         Serial.println(
-            "[init] Long press during pairing, clearing and restarting");
+            "[init] Long press during pairing, refreshing pair code");
         Serial.flush();
-        settings::clearWifiAndToken();
-        ESP.restart();
+        if (refreshRegistration()) {
+          Serial.println("[init] Pair code refreshed");
+          Serial.flush();
+        } else {
+          Serial.println("[init] Failed to refresh pair code, will retry");
+          Serial.flush();
+        }
       }
     }
     Serial.println("[pair] paired");

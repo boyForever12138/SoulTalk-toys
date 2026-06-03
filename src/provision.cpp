@@ -88,6 +88,24 @@ void handleSave() {
   s_done = true;
 }
 
+// Captive portal detection handlers for various OS/browsers
+void handleConnectTest() {
+  // Windows
+  s_server.send(200, "text/plain", "Microsoft Connect Test");
+}
+
+void handleGenerate204() {
+  // Android/Chrome
+  s_server.sendHeader("Location", "/", true);
+  s_server.send(204, "text/plain", "");
+}
+
+void handleHotspotDetect() {
+  // iOS/macOS
+  s_server.sendHeader("Location", "/", true);
+  s_server.send(302, "text/html", "<html><body>Redirecting...</body></html>");
+}
+
 void handleNotFound() {
   s_server.sendHeader("Location", "/", true);
   s_server.send(302, "text/plain", "");
@@ -118,6 +136,13 @@ void runPortal() {
   s_dns.start(53, "*", ip);
   s_server.on("/", handleRoot);
   s_server.on("/save", HTTP_POST, handleSave);
+  // Captive portal detection handlers
+  s_server.on("/connecttest.txt", handleConnectTest);
+  s_server.on("/ncsi.txt", handleConnectTest);
+  s_server.on("/generate_204", handleGenerate204);
+  s_server.on("/hotspot-detect.html", handleHotspotDetect);
+  s_server.on("/library/test/success.html", handleHotspotDetect);
+  s_server.on("/redirect", handleHotspotDetect);
   s_server.onNotFound(handleNotFound);
   s_server.begin();
 
