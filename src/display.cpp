@@ -39,7 +39,9 @@ const char* stateText(display_ui::State s) {
 namespace display_ui {
 
 void begin() {
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  // U8g2 HW_I2C constructor calls Wire.begin() internally.
+  // Configure pins BEFORE that so U8g2 uses the correct I2C bus.
+  Wire.setPins(PIN_I2C_SDA, PIN_I2C_SCL);
   u8g2.begin();
   u8g2.setBusClock(400000);
   u8g2.setFont(u8g2_font_6x10_tf);

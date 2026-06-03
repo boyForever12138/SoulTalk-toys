@@ -197,9 +197,12 @@ void setup() {
   settings::begin();
   display_ui::begin();
 
+  Serial.println("[init] Checking WiFi config...");
   if (!settings::hasWifi()) {
+    Serial.println("[init] No WiFi config found, starting provisioning portal");
     provision::runPortal();  // never returns (reboots)
   }
+  Serial.println("[init] WiFi config found, continuing boot");
 
   settings::load(s_cfg);
   api_client::configure(s_cfg.host, s_cfg.port, s_cfg.tls);
