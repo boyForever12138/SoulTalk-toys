@@ -56,7 +56,7 @@ void clearWifiAndToken() {
 }
 
 bool hasWifi() {
-  return prefs.getString("ssid", "").length() > 0;
+  return prefs.isKey("ssid") && prefs.getString("ssid", "").length() > 0;
 }
 
 String deviceId() {
