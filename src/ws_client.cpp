@@ -52,7 +52,9 @@ void begin(const String &host, uint16_t port, bool tls,
            const String &deviceToken) {
   String path = String(API_PATH_WS_VOICE) + "?token=" + deviceToken;
   if (tls) {
-    s_ws.beginSSL(host.c_str(), port, path.c_str(), SOULTALK_SSL_FINGERPRINT);
+    // ESP32: Use ESP-IDF's built-in root CA bundle (includes Let's Encrypt)
+    // Pass nullptr to use the default certificate bundle
+    s_ws.beginSslWithBundle(host.c_str(), port, path.c_str(), nullptr, 0);
   } else {
     s_ws.begin(host.c_str(), port, path.c_str());
   }
