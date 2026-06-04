@@ -31,6 +31,18 @@ bool load(DeviceSettings &out) {
   out.tls = prefs.getBool("tls", DEFAULT_TLS);
   out.deviceToken = safeGetString("dtoken", "");
   out.personaId = prefs.isKey("persona") ? prefs.getInt("persona", -1) : -1;
+  out.websocketUrl = safeGetString("wsUrl", "");
+
+  // Auto-upgrade: if saved config is HTTP, force HTTPS (server requires it)
+  if (!out.tls && out.host == DEFAULT_HOST) {
+    Serial.println("[settings] Auto-upgrading HTTP to HTTPS");
+    out.tls = true;
+    out.port = 443;
+    // Save upgraded config to NVS
+    prefs.putBool("tls", true);
+    prefs.putUShort("port", 443);
+  }
+
   return out.wifiSsid.length() > 0;
 }
 
@@ -49,6 +61,9 @@ void saveDeviceToken(const String &token) {
 }
 void savePersonaId(int32_t id) {
   prefs.putInt("persona", id);
+}
+void saveWebsocketUrl(const String &url) {
+  prefs.putString("wsUrl", url);
 }
 
 void clearWifiAndToken() {

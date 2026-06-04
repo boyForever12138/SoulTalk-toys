@@ -55,7 +55,9 @@ void begin() {
 
   Serial.println("[display] setFont...");
   Serial.flush();
-  u8g2.setFont(u8g2_font_6x10_tf);
+  // wqy12 GB2312 font: covers ~6700 Chinese chars, ~12px height suits 128x32
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+  u8g2.enableUTF8Print();
 
   setLine(0, "SoulTalk Toy");
   setLine(1, "Booting...");
@@ -81,8 +83,10 @@ void setLine(uint8_t row, const String& text) {
 
 void render() {
   u8g2.clearBuffer();
-  u8g2.drawStr(0, 12, s_lines[0].c_str());
-  u8g2.drawStr(0, 28, s_lines[1].c_str());
+  // wqy12: ~12px height, baseline ~10. Two rows fit on 128x32 (rows at y=12,
+  // y=28).
+  u8g2.drawUTF8(0, 12, s_lines[0].c_str());
+  u8g2.drawUTF8(0, 28, s_lines[1].c_str());
   u8g2.sendBuffer();
 }
 

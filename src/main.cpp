@@ -102,6 +102,14 @@ bool refreshRegistration() {
   s_cfg.deviceToken = r.deviceToken;
   settings::saveDeviceToken(r.deviceToken);
   api_client::setDeviceToken(r.deviceToken);
+
+  // Store websocket URL if provided
+  if (r.websocketUrl.length() > 0) {
+    s_cfg.websocketUrl = r.websocketUrl;
+    settings::saveWebsocketUrl(r.websocketUrl);
+    Serial.printf("[register] Got websocket URL: %s\n", r.websocketUrl.c_str());
+  }
+
   Serial.printf("[register] paired=%d pair_code=%s\n", r.paired,
                 r.pairCode.c_str());
   if (!r.paired && r.pairCode.length()) {
@@ -186,6 +194,54 @@ void streamOneFrame() {
   if (got == 0)
     return;
   ws_client::sendBinary((const uint8_t *)s_pcmBuf, got * sizeof(int16_t));
+}
+
+// Parse WebSocket URL (ws://host:port/path or wss://host:port/path)
+// Returns true if successfully parsed, false otherwise
+bool parseWebsocketUrl(const String &url, String &outHost, uint16_t &outPort,
+                       bool &outTls, String &outPath) {
+  // Check protocol
+  bool isSecure = false;
+  int protocolEnd = 0;
+  if (url.startsWith("wss://")) {
+    isSecure = true;
+    protocolEnd = 6;
+  } else if (url.startsWith("ws://")) {
+    isSecure = false;
+    protocolEnd = 5;
+  } else {
+    return false;
+  }
+
+  // Find host:port
+  int hostStart = protocolEnd;
+  int pathStart = url.indexOf('/', hostStart);
+  if (pathStart < 0) {
+    pathStart = url.length();
+  }
+
+  // Extract host and port
+  String hostPort = url.substring(hostStart, pathStart);
+  int colonIdx = hostPort.lastIndexOf(':');
+  if (colonIdx >= 0) {
+    // Has explicit port
+    outHost = hostPort.substring(0, colonIdx);
+    outPort = hostPort.substring(colonIdx + 1).toInt();
+  } else {
+    // No explicit port, use protocol defaults
+    outHost = hostPort;
+    outPort = isSecure ? 443 : 80;
+  }
+
+  // Extract path
+  if (pathStart < (int)url.length()) {
+    outPath = url.substring(pathStart);
+  } else {
+    outPath = "/";
+  }
+
+  outTls = isSecure;
+  return true;
 }
 }  // namespace
 
@@ -295,9 +351,29 @@ void setup() {
     Serial.printf("[init] /me response: ok=%d paired=%d\n", me.ok, me.paired);
     Serial.flush();
     alreadyPaired = me.ok && me.paired;
-    if (alreadyPaired && me.personaId >= 0) {
-      s_cfg.personaId = me.personaId;
-      settings::savePersonaId(me.personaId);
+    if (alreadyPaired) {
+      if (me.personaId >= 0) {
+        s_cfg.personaId = me.personaId;
+        settings::savePersonaId(me.personaId);
+      } else if (!me.personas.empty()) {
+        // No persona selected yet, auto-pick the first available one
+        int firstId = me.personas[0].id;
+        Serial.printf("[init] No persona set, auto-selecting #%d (%s)\n",
+                      firstId, me.personas[0].name.c_str());
+        Serial.flush();
+        if (api_client::setPersona(firstId)) {
+          s_cfg.personaId = firstId;
+          settings::savePersonaId(firstId);
+        }
+      }
+      // Store websocket URL for later use
+      if (me.websocketUrl.length() > 0) {
+        s_cfg.websocketUrl = me.websocketUrl;
+        settings::saveWebsocketUrl(me.websocketUrl);
+        Serial.printf("[init] Got websocket URL: %s\n",
+                      me.websocketUrl.c_str());
+        Serial.flush();
+      }
     }
   } else {
     Serial.println("[init] No token, will register");
@@ -351,7 +427,33 @@ void setup() {
   ws_client::onText(onWsText);
   ws_client::onBinary(onWsBinary);
   ws_client::onStatus(onWsStatus);
-  ws_client::begin(s_cfg.host, s_cfg.port, s_cfg.tls, s_cfg.deviceToken);
+
+  // Use dynamic WebSocket URL if available, otherwise fall back to config
+  String wsHost = s_cfg.host;
+  uint16_t wsPort = s_cfg.port;
+  bool wsTls = s_cfg.tls;
+
+  if (s_cfg.websocketUrl.length() > 0) {
+    String path;
+    if (parseWebsocketUrl(s_cfg.websocketUrl, wsHost, wsPort, wsTls, path)) {
+      Serial.printf(
+          "[init] Using dynamic WebSocket URL: %s (host=%s, port=%d, tls=%d)\n",
+          s_cfg.websocketUrl.c_str(), wsHost.c_str(), wsPort, wsTls);
+      Serial.flush();
+    } else {
+      Serial.println(
+          "[init] Failed to parse WebSocket URL, using fallback config");
+      Serial.flush();
+      wsHost = s_cfg.host;
+      wsPort = s_cfg.port;
+      wsTls = s_cfg.tls;
+    }
+  } else {
+    Serial.println("[init] No dynamic WebSocket URL, using fallback config");
+    Serial.flush();
+  }
+
+  ws_client::begin(wsHost, wsPort, wsTls, s_cfg.deviceToken);
   Serial.println("[init] WebSocket init complete, entering loop");
   Serial.flush();
 }
@@ -372,7 +474,20 @@ void loop() {
   ws_client::loop();
 
   button::Event ev = button::poll();
-  if (ev == button::Event::LongPress) {
+
+  // Surface button events on the OLED for user feedback
+  if (ev != button::Event::None) {
+    const char *evName = ev == button::Event::Pressed     ? "Pressed"
+                         : ev == button::Event::Released  ? "Released"
+                         : ev == button::Event::LongPress ? "LongPress"
+                                                          : "?";
+    display_ui::setLine(1, String("BTN: ") + evName);
+    display_ui::render();
+  }
+
+  // Only allow long press to wipe & reboot when in Idle state
+  // This prevents accidental reset during connection/pairing
+  if (ev == button::Event::LongPress && s_state == AppState::Idle) {
     Serial.println("[btn] long press -> wipe & reboot");
     Serial.flush();
     settings::clearWifiAndToken();

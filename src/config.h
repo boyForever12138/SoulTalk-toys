@@ -19,6 +19,14 @@
 #define DEFAULT_PORT 443
 #define DEFAULT_TLS true
 
+// WebSocket connection: connect directly to origin IP (CDN doesn't proxy WS),
+// but present the domain as TLS SNI and HTTP Host header so nginx routes
+// to the correct server block.
+#define WS_HOST "soultalk.kunpenglingjing.cn"
+#define WS_CONNECT_IP "119.45.31.103"
+#define WS_PORT 443
+#define WS_TLS true
+
 // SSL certificate fingerprint for soultalk.kunpenglingjing.cn (SHA1)
 // Update this when certificate is renewed
 #define SOULTALK_SSL_FINGERPRINT \

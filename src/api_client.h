@@ -8,6 +8,7 @@ struct RegisterResult {
   bool ok;
   String deviceToken;
   String pairCode;  // empty when already paired
+  String websocketUrl;
   bool paired;
   String error;
 };
@@ -22,6 +23,7 @@ struct MeResult {
   bool paired;
   int personaId;  // -1 if none
   String personaName;
+  String websocketUrl;
   std::vector<PersonaInfo> personas;
   String error;
 };
