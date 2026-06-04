@@ -52,7 +52,7 @@ void begin(const String &host, uint16_t port, bool tls,
            const String &deviceToken) {
   String path = String(API_PATH_WS_VOICE) + "?token=" + deviceToken;
   if (tls) {
-    s_ws.beginSSL(host.c_str(), port, path.c_str());
+    s_ws.beginSSL(host.c_str(), port, path.c_str(), SOULTALK_SSL_FINGERPRINT);
   } else {
     s_ws.begin(host.c_str(), port, path.c_str());
   }

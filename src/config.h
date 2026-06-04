@@ -19,6 +19,11 @@
 #define DEFAULT_PORT 443
 #define DEFAULT_TLS true
 
+// SSL certificate fingerprint for soultalk.kunpenglingjing.cn (SHA1)
+// Update this when certificate is renewed
+#define SOULTALK_SSL_FINGERPRINT \
+  "1B:91:89:5E:7D:0C:43:6E:B5:09:0C:19:01:71:22:AF:00:F7:A5:C6"
+
 // HTTP/WebSocket paths on the SoulTalk backend
 #define API_PATH_REGISTER "/api/devices/register"
 #define API_PATH_ME "/api/devices/me"
