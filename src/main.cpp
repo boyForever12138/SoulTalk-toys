@@ -147,6 +147,11 @@ void onWsText(const String &json) {
     if (pid >= 0)
       s_cfg.personaId = pid;
     setState(AppState::Idle);
+  } else if (!strcmp(type, "listening")) {
+    if (s_state == AppState::Recording) {
+      display_ui::setLine(1, "Listening");
+      display_ui::render();
+    }
   } else if (!strcmp(type, "transcript")) {
     display_ui::setLine(1, String("> ") + (const char *)(doc["text"] | ""));
     display_ui::render();
