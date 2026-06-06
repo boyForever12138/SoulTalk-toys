@@ -8,7 +8,7 @@ using TextHandler = std::function<void(const String &json)>;
 using BinaryHandler = std::function<void(const uint8_t *data, size_t len)>;
 using StatusHandler = std::function<void(bool connected)>;
 
-void begin(const String &host, uint16_t port, bool tls,
+void begin(const String &host, uint16_t port, bool tls, const String &path,
            const String &deviceToken);
 void loop();
 bool isConnected();

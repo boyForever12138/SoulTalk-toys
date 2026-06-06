@@ -48,14 +48,18 @@ Configure `soultalk-server/api/.env`:
 ```env
 DOUBAO_S2S_ENABLED=true
 DOUBAO_S2S_BASE_URL=wss://openspeech.bytedance.com/api/v3/realtime/dialogue
-DOUBAO_S2S_API_KEY=
+DOUBAO_S2S_APP_ID=
+DOUBAO_S2S_ACCESS_KEY=
+DOUBAO_S2S_APP_KEY=PlgvMymc7f3tQnJ6
 DOUBAO_S2S_RESOURCE_ID=volc.speech.dialog
-DOUBAO_S2S_MODEL=2.2.0.0
+DOUBAO_S2S_MODEL=1.2.1.1
 DOUBAO_S2S_SPEAKER=zh_female_vv_jupiter_bigtts
 DOUBAO_S2S_INPUT_FORMAT=pcm
 DOUBAO_S2S_INPUT_SAMPLE_RATE=16000
 DOUBAO_S2S_OUTPUT_FORMAT=pcm_s16le
 DOUBAO_S2S_OUTPUT_SAMPLE_RATE=16000
+# Set this when the public CDN does not proxy WebSocket.
+DEVICE_VOICE_WS_URL=wss://<origin-host-or-ip>/api/devices/voice
 ```
 
 ## Build And Flash

@@ -437,13 +437,13 @@ void setup() {
   String wsHost = s_cfg.host;
   uint16_t wsPort = s_cfg.port;
   bool wsTls = s_cfg.tls;
+  String wsPath = API_PATH_WS_VOICE;
 
   if (s_cfg.websocketUrl.length() > 0) {
-    String path;
-    if (parseWebsocketUrl(s_cfg.websocketUrl, wsHost, wsPort, wsTls, path)) {
+    if (parseWebsocketUrl(s_cfg.websocketUrl, wsHost, wsPort, wsTls, wsPath)) {
       Serial.printf(
-          "[init] Using dynamic WebSocket URL: %s (host=%s, port=%d, tls=%d)\n",
-          s_cfg.websocketUrl.c_str(), wsHost.c_str(), wsPort, wsTls);
+          "[init] Using dynamic WebSocket URL: host=%s, port=%d, tls=%d, path=%s\n",
+          wsHost.c_str(), wsPort, wsTls, wsPath.c_str());
       Serial.flush();
     } else {
       Serial.println(
@@ -452,13 +452,14 @@ void setup() {
       wsHost = s_cfg.host;
       wsPort = s_cfg.port;
       wsTls = s_cfg.tls;
+      wsPath = API_PATH_WS_VOICE;
     }
   } else {
     Serial.println("[init] No dynamic WebSocket URL, using fallback config");
     Serial.flush();
   }
 
-  ws_client::begin(wsHost, wsPort, wsTls, s_cfg.deviceToken);
+  ws_client::begin(wsHost, wsPort, wsTls, wsPath, s_cfg.deviceToken);
   Serial.println("[init] WebSocket init complete, entering loop");
   Serial.flush();
 }

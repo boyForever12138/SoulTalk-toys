@@ -73,33 +73,85 @@ bool sendJson(const JsonDocument &doc) {
   serializeJson(doc, s);
   return s_ws.sendTXT(s);
 }
+
+bool isIpv4Literal(const String &host) {
+  if (host.length() == 0)
+    return false;
+  int dots = 0;
+  for (size_t i = 0; i < host.length(); ++i) {
+    char c = host.charAt(i);
+    if (c == '.') {
+      dots++;
+      continue;
+    }
+    if (c < '0' || c > '9')
+      return false;
+  }
+  return dots == 3;
+}
+
+String pathWithDeviceToken(const String &path, const String &deviceToken) {
+  String out = path.length() > 0 ? path : String(API_PATH_WS_VOICE);
+  if (!out.startsWith("/"))
+    out = "/" + out;
+  if (out.indexOf("token=") >= 0)
+    return out;
+  out += (out.indexOf('?') >= 0 ? "&" : "?");
+  out += "token=" + deviceToken;
+  return out;
+}
+
+String redactTokenForLog(const String &path) {
+  int tokenIdx = path.indexOf("token=");
+  if (tokenIdx < 0)
+    return path;
+  int valueStart = tokenIdx + 6;
+  int valueEnd = path.indexOf('&', valueStart);
+  if (valueEnd < 0)
+    valueEnd = path.length();
+  return path.substring(0, valueStart) + "<redacted>" + path.substring(valueEnd);
+}
 }  // namespace
 
 namespace ws_client {
 
-void begin(const String &host, uint16_t port, bool tls,
+void begin(const String &host, uint16_t port, bool tls, const String &path,
            const String &deviceToken) {
-  // Use the domain for SNI/Host (so nginx routes correctly), but connect
-  // directly to the origin server IP to bypass CDN.
-  String wsHost = WS_HOST;
-  uint16_t wsPort = WS_PORT;
-  bool wsTls = WS_TLS;
+  String wsHost = host.length() > 0 ? host : String(WS_HOST);
+  uint16_t wsPort = port > 0 ? port : WS_PORT;
+  bool wsTls = tls;
+  String connectIp = "";
+  String sniHost = wsHost;
+  String requestPath = pathWithDeviceToken(path, deviceToken);
 
-  String path = String(API_PATH_WS_VOICE) + "?token=" + deviceToken;
+  if (wsTls && isIpv4Literal(wsHost)) {
+    connectIp = wsHost;
+    sniHost = WS_HOST;
+  } else if (wsTls && wsHost == String(WS_HOST) &&
+             String(WS_CONNECT_IP).length() > 0) {
+    connectIp = WS_CONNECT_IP;
+  }
 
-  Serial.printf("[ws] Connecting to %s:%d%s (TLS: %s, via IP: %s)\n",
-                wsHost.c_str(), wsPort, path.c_str(), wsTls ? "yes" : "no",
-                WS_CONNECT_IP);
+  String logPath = redactTokenForLog(requestPath);
+  Serial.printf("[ws] Connecting to %s:%d%s (TLS: %s",
+                sniHost.c_str(), wsPort, logPath.c_str(),
+                wsTls ? "yes" : "no");
+  if (connectIp.length() > 0) {
+    Serial.printf(", via IP: %s", connectIp.c_str());
+  }
+  Serial.println(")");
 
   if (wsTls) {
-    s_ws.beginSSL(wsHost.c_str(), wsPort, path.c_str(), "");
-    s_ws.setConnectIP(WS_CONNECT_IP);
+    s_ws.beginSSL(sniHost.c_str(), wsPort, requestPath.c_str(), "");
+    if (connectIp.length() > 0) {
+      s_ws.setConnectIP(connectIp.c_str());
+    }
 
-    String origin = "https://" + wsHost;
+    String origin = "https://" + sniHost;
     s_ws.setExtraHeaders(("Origin: " + origin).c_str());
     Serial.printf("[ws] Set Origin header: %s\n", origin.c_str());
   } else {
-    s_ws.begin(wsHost.c_str(), wsPort, path.c_str());
+    s_ws.begin(wsHost.c_str(), wsPort, requestPath.c_str());
   }
   s_ws.onEvent(onEvent);
   s_ws.setReconnectInterval(2000);
