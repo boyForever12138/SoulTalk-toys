@@ -41,11 +41,11 @@ AppState s_state = AppState::Boot;
 
 DeviceSettings s_cfg;
 
-// Per-frame buffers
+// Per-frame buffer for recording
 int16_t s_pcmBuf[AUDIO_FRAME_SAMPLES];
-int16_t s_playBuf[AUDIO_FRAME_SAMPLES * 4];
 
 uint32_t s_lastPairPollMs = 0;
+uint32_t s_eorTimeMs = 0;  // timestamp when end_of_response was received
 
 void setState(AppState s) {
   s_state = s;
@@ -153,10 +153,13 @@ void onWsText(const String &json) {
   } else if (!strcmp(type, "reply_text")) {
     // Could show response preview
   } else if (!strcmp(type, "end_of_response")) {
-    audio_out::mute();
-    setState(AppState::Idle);
+    // Record when end_of_response arrived. The actual clear happens after a
+    // grace period to ensure all buffered audio has been played.
+    s_eorTimeMs = millis();
+    setState(AppState::Waiting);
   } else if (!strcmp(type, "error")) {
     Serial.printf("[ws] error: %s\n", (const char *)(doc["message"] | "?"));
+    audio_out::clear();
     audio_out::mute();
     setState(AppState::Idle);
   } else if (!strcmp(type, "persona_switched")) {
@@ -171,11 +174,7 @@ void onWsText(const String &json) {
 void onWsBinary(const uint8_t *data, size_t len) {
   if (s_state == AppState::Waiting)
     setState(AppState::Playing);
-  size_t samples = len / 2;
-  if (samples > sizeof(s_playBuf) / sizeof(s_playBuf[0]))
-    samples = sizeof(s_playBuf) / sizeof(s_playBuf[0]);
-  memcpy(s_playBuf, data, samples * 2);
-  audio_out::write(s_playBuf, samples, 200);
+  audio_out::push(data, len, 2);
 }
 
 void onWsStatus(bool connected) {
@@ -499,6 +498,8 @@ void loop() {
       if (ev == button::Event::Pressed && ws_client::isConnected()) {
         Serial.println("[ptt] pressed, starting recording");
         Serial.flush();
+        // Stop any ongoing playback immediately
+        audio_out::stop();
         ws_client::sendStart(s_cfg.personaId);
         setState(AppState::Recording);
       }
@@ -516,6 +517,18 @@ void loop() {
 
     case AppState::Waiting:
     case AppState::Playing:
+      audio_out::update();
+      audio_out::printStats();
+      // After end_of_response, wait for buffer to drain + grace period before
+      // clearing. This prevents cutting off the tail end of audio.
+      if (s_state == AppState::Waiting && audio_out::isBufferEmpty()) {
+        uint32_t elapsed = millis() - s_eorTimeMs;
+        if (elapsed > 500) {  // 500ms grace after buffer empties
+          audio_out::clear();
+          audio_out::mute();
+          setState(AppState::Idle);
+        }
+      }
       break;
 
     case AppState::Connecting:
