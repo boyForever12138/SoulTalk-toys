@@ -46,9 +46,13 @@ int16_t s_pcmBuf[AUDIO_FRAME_SAMPLES];
 int16_t s_playBuf[AUDIO_FRAME_SAMPLES * 4];
 
 uint32_t s_lastPairPollMs = 0;
+uint32_t s_stateStartedMs = 0;
+uint32_t s_lastAudioRxMs = 0;
+bool s_responseEnded = false;
 
 void setState(AppState s) {
   s_state = s;
+  s_stateStartedMs = millis();
   switch (s) {
     case AppState::Boot:
       display_ui::setState(display_ui::State::Boot);
@@ -73,6 +77,9 @@ void setState(AppState s) {
       break;
   }
 }
+
+void sendStatusNow();
+void handleCommand(const JsonDocument &doc);
 
 bool connectWifi() {
   Serial.printf("[wifi] connecting to %s\n", s_cfg.wifiSsid.c_str());
@@ -147,6 +154,9 @@ void onWsText(const String &json) {
     if (pid >= 0)
       s_cfg.personaId = pid;
     setState(AppState::Idle);
+    sendStatusNow();
+  } else if (!strcmp(type, "command")) {
+    handleCommand(doc);
   } else if (!strcmp(type, "listening")) {
     if (s_state == AppState::Recording) {
       display_ui::setLine(1, "Listening");
@@ -158,29 +168,164 @@ void onWsText(const String &json) {
   } else if (!strcmp(type, "reply_text")) {
     // Could show response preview
   } else if (!strcmp(type, "end_of_response")) {
-    audio_out::mute();
-    setState(AppState::Idle);
+    s_responseEnded = true;
+    if (audio_out::isDrained()) {
+      audio_out::mute();
+      setState(AppState::Idle);
+    } else {
+      setState(AppState::Playing);
+    }
   } else if (!strcmp(type, "error")) {
     Serial.printf("[ws] error: %s\n", (const char *)(doc["message"] | "?"));
-    audio_out::mute();
+    audio_out::reset();
     setState(AppState::Idle);
   } else if (!strcmp(type, "persona_switched")) {
     int pid = doc["persona_id"] | -1;
     if (pid >= 0) {
       s_cfg.personaId = pid;
       settings::savePersonaId(pid);
+      sendStatusNow();
     }
   }
 }
 
 void onWsBinary(const uint8_t *data, size_t len) {
-  if (s_state == AppState::Waiting)
+  if (s_state == AppState::Waiting || s_state == AppState::Idle)
     setState(AppState::Playing);
   size_t samples = len / 2;
   if (samples > sizeof(s_playBuf) / sizeof(s_playBuf[0]))
     samples = sizeof(s_playBuf) / sizeof(s_playBuf[0]);
   memcpy(s_playBuf, data, samples * 2);
-  audio_out::write(s_playBuf, samples, 200);
+  size_t queued = audio_out::enqueue(s_playBuf, samples);
+  s_lastAudioRxMs = millis();
+  if (queued < samples) {
+    Serial.printf("[audio] output queue accepted %u/%u samples\n",
+                  (unsigned)queued, (unsigned)samples);
+  }
+}
+
+const char *appStateName(AppState s) {
+  switch (s) {
+    case AppState::Boot:
+      return "boot";
+    case AppState::Connecting:
+      return "connecting";
+    case AppState::Pairing:
+      return "pairing";
+    case AppState::Idle:
+      return "idle";
+    case AppState::Recording:
+      return "recording";
+    case AppState::Waiting:
+      return "waiting";
+    case AppState::Playing:
+      return "playing";
+  }
+  return "unknown";
+}
+
+void sendStatusNow() {
+  if (!ws_client::isConnected())
+    return;
+  int rssi = WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0;
+  ws_client::sendStatus(appStateName(s_state), s_cfg.personaId, rssi, millis());
+}
+
+void enqueueTestTone(uint32_t durationMs) {
+  durationMs = constrain(durationMs, (uint32_t)100, (uint32_t)3000);
+  audio_out::reset();
+  uint32_t remaining = (AUDIO_SAMPLE_RATE * durationMs) / 1000;
+  uint32_t phase = 0;
+  uint32_t halfPeriod = AUDIO_SAMPLE_RATE / (880 * 2);
+  if (halfPeriod == 0)
+    halfPeriod = 1;
+
+  while (remaining > 0) {
+    size_t n = remaining > AUDIO_FRAME_SAMPLES ? AUDIO_FRAME_SAMPLES : remaining;
+    for (size_t i = 0; i < n; ++i) {
+      bool high = ((phase / halfPeriod) % 2) == 0;
+      s_playBuf[i] = high ? 9000 : -9000;
+      phase++;
+    }
+    audio_out::enqueue(s_playBuf, n);
+    remaining -= n;
+  }
+  s_responseEnded = true;
+  s_lastAudioRxMs = millis();
+  setState(AppState::Playing);
+}
+
+void handleCommand(const JsonDocument &doc) {
+  int commandId = doc["command_id"] | -1;
+  const char *name = doc["name"] | "";
+  JsonObjectConst payload = doc["payload"].as<JsonObjectConst>();
+  if (commandId < 0 || !name || !strlen(name)) {
+    if (commandId >= 0)
+      ws_client::sendCommandAck(commandId, false, "invalid command");
+    return;
+  }
+
+  if (!strcmp(name, "set_persona")) {
+    int personaId = payload["persona_id"] | -1;
+    if (personaId < 0) {
+      ws_client::sendCommandAck(commandId, false, "missing persona_id");
+      return;
+    }
+    s_cfg.personaId = personaId;
+    settings::savePersonaId(personaId);
+    display_ui::setLine(0, "SoulTalk Toy");
+    display_ui::setLine(1, "Persona synced");
+    display_ui::render();
+    ws_client::sendCommandAck(commandId, true, "persona synced");
+    sendStatusNow();
+    return;
+  }
+
+  if (!strcmp(name, "display_text")) {
+    String line1 = String((const char *)(payload["line1"] | "SoulTalk"));
+    String line2 = String((const char *)(payload["line2"] | ""));
+    display_ui::setLine(0, line1.substring(0, 24));
+    display_ui::setLine(1, line2.substring(0, 24));
+    display_ui::render();
+    ws_client::sendCommandAck(commandId, true, "displayed");
+    return;
+  }
+
+  if (!strcmp(name, "test_sound")) {
+    if (s_state == AppState::Recording || s_state == AppState::Waiting) {
+      ws_client::sendCommandAck(commandId, false, "device busy");
+      return;
+    }
+    uint32_t durationMs = payload["duration_ms"] | 600;
+    enqueueTestTone(durationMs);
+    ws_client::sendCommandAck(commandId, true, "test sound queued");
+    sendStatusNow();
+    return;
+  }
+
+  if (!strcmp(name, "reboot")) {
+    uint32_t delayMs = payload["delay_ms"] | 800;
+    ws_client::sendCommandAck(commandId, true, "rebooting");
+    display_ui::setLine(0, "SoulTalk Toy");
+    display_ui::setLine(1, "Rebooting...");
+    display_ui::render();
+    delay(constrain(delayMs, (uint32_t)100, (uint32_t)10000));
+    ESP.restart();
+    return;
+  }
+
+  if (!strcmp(name, "unbind")) {
+    ws_client::sendCommandAck(commandId, true, "unbinding");
+    display_ui::setLine(0, "SoulTalk Toy");
+    display_ui::setLine(1, "Unbinding...");
+    display_ui::render();
+    settings::clearDeviceBinding();
+    delay(300);
+    ESP.restart();
+    return;
+  }
+
+  ws_client::sendCommandAck(commandId, false, "unsupported command");
 }
 
 void onWsStatus(bool connected) {
@@ -189,6 +334,8 @@ void onWsStatus(bool connected) {
     if (s_state == AppState::Connecting)
       setState(AppState::Idle);
   } else {
+    audio_out::reset();
+    s_responseEnded = false;
     if (s_state != AppState::Connecting)
       setState(AppState::Connecting);
   }
@@ -466,6 +613,7 @@ void setup() {
 
 void loop() {
   static uint32_t s_lastLoopLogMs = 0;
+  static uint32_t s_lastStatusMs = 0;
   static uint32_t s_loopCount = 0;
   s_loopCount++;
 
@@ -473,11 +621,20 @@ void loop() {
   if (millis() - s_lastLoopLogMs > 5000) {
     Serial.printf("[loop] running, count=%u state=%d ws=%d\n", s_loopCount,
                   (int)s_state, ws_client::isConnected());
+    if (s_state == AppState::Waiting || s_state == AppState::Playing) {
+      audio_out::logStats();
+    }
     Serial.flush();
     s_lastLoopLogMs = millis();
   }
 
   ws_client::loop();
+
+  if (ws_client::isConnected() &&
+      (millis() - s_lastStatusMs) > DEVICE_STATUS_INTERVAL_MS) {
+    sendStatusNow();
+    s_lastStatusMs = millis();
+  }
 
   button::Event ev = button::poll();
 
@@ -487,7 +644,10 @@ void loop() {
                          : ev == button::Event::Released  ? "Released"
                          : ev == button::Event::LongPress ? "LongPress"
                                                           : "?";
-    display_ui::setLine(1, String("BTN: ") + evName);
+    display_ui::setLine(1, (s_state == AppState::Waiting ||
+                            s_state == AppState::Playing)
+                               ? "Busy"
+                               : String("BTN: ") + evName);
     display_ui::render();
   }
 
@@ -505,6 +665,8 @@ void loop() {
       if (ev == button::Event::Pressed && ws_client::isConnected()) {
         Serial.println("[ptt] pressed, starting recording");
         Serial.flush();
+        audio_out::reset();
+        s_responseEnded = false;
         ws_client::sendStart(s_cfg.personaId);
         setState(AppState::Recording);
       }
@@ -521,7 +683,27 @@ void loop() {
       break;
 
     case AppState::Waiting:
+      if ((millis() - s_stateStartedMs) > AUDIO_WAITING_TIMEOUT_MS) {
+        Serial.println("[audio] waiting timeout -> idle");
+        audio_out::reset();
+        s_responseEnded = false;
+        setState(AppState::Idle);
+      }
+      break;
     case AppState::Playing:
+      if (s_responseEnded && audio_out::isDrained()) {
+        audio_out::mute();
+        setState(AppState::Idle);
+      } else if (!s_responseEnded && audio_out::isDrained() &&
+                 (millis() - s_lastAudioRxMs) > AUDIO_PLAYBACK_IDLE_TIMEOUT_MS) {
+        Serial.println("[audio] playback idle timeout -> idle");
+        setState(AppState::Idle);
+      } else if ((millis() - s_stateStartedMs) > AUDIO_WAITING_TIMEOUT_MS) {
+        Serial.println("[audio] playback hard timeout -> idle");
+        audio_out::reset();
+        s_responseEnded = false;
+        setState(AppState::Idle);
+      }
       break;
 
     case AppState::Connecting:

@@ -24,4 +24,6 @@ bool sendStart(int personaId /* -1 means use device default */);
 bool sendEnd();
 bool sendPing();
 bool sendSetPersona(int personaId);
+bool sendCommandAck(int commandId, bool ok, const String &message = "");
+bool sendStatus(const String &state, int personaId, int rssi, uint32_t uptimeMs);
 }  // namespace ws_client

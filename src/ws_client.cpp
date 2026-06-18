@@ -34,7 +34,9 @@ void onEvent(WStype_t type, uint8_t *payload, size_t length) {
       break;
     }
     case WStype_BIN:
+#if WS_LOG_BINARY_FRAMES
       Serial.printf("[ws] Received binary: %d bytes\n", length);
+#endif
       if (s_onBinary)
         s_onBinary(payload, length);
       break;
@@ -205,6 +207,38 @@ bool sendSetPersona(int personaId) {
   JsonDocument doc;
   doc["type"] = "set_persona";
   doc["persona_id"] = personaId;
+  return sendJson(doc);
+}
+
+bool sendCommandAck(int commandId, bool ok, const String &message) {
+  JsonDocument doc;
+  doc["type"] = "command_ack";
+  doc["command_id"] = commandId;
+  doc["ok"] = ok;
+  if (message.length() > 0)
+    doc["message"] = message;
+  return sendJson(doc);
+}
+
+bool sendStatus(const String &state, int personaId, int rssi,
+                uint32_t uptimeMs) {
+  JsonDocument doc;
+  doc["type"] = "status";
+  doc["state"] = state;
+  doc["rssi"] = rssi;
+  doc["uptime_ms"] = uptimeMs;
+  doc["firmware_version"] = FIRMWARE_VERSION;
+  doc["hardware_model"] = HARDWARE_MODEL;
+  if (personaId >= 0)
+    doc["persona_id"] = personaId;
+
+  JsonObject capabilities = doc["capabilities"].to<JsonObject>();
+  capabilities["set_persona"] = true;
+  capabilities["display_text"] = true;
+  capabilities["test_sound"] = true;
+  capabilities["reboot"] = true;
+  capabilities["unbind"] = true;
+  capabilities["voice_ptt"] = true;
   return sendJson(doc);
 }
 
