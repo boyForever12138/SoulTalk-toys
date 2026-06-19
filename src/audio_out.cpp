@@ -28,6 +28,7 @@ uint32_t s_drained = 0;
 uint32_t s_dropped = 0;
 uint32_t s_underruns = 0;
 bool s_playbackActive = false;
+bool s_streamEnded = false;
 bool s_taskRunning = false;
 TaskHandle_t s_task = nullptr;
 portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -73,6 +74,13 @@ size_t currentBufferedSamples() {
   return out;
 }
 
+bool streamEnded() {
+  portENTER_CRITICAL(&s_mux);
+  bool ended = s_streamEnded;
+  portEXIT_CRITICAL(&s_mux);
+  return ended;
+}
+
 void setPlaybackActive(bool active) {
   portENTER_CRITICAL(&s_mux);
   s_playbackActive = active;
@@ -86,7 +94,7 @@ void playbackTask(void *) {
   while (s_taskRunning) {
     size_t buffered = currentBufferedSamples();
     if (!s_playbackActive) {
-      if (buffered < kPrebufferSamples) {
+      if (buffered == 0 || (buffered < kPrebufferSamples && !streamEnded())) {
         vTaskDelay(pdMS_TO_TICKS(5));
         continue;
       }
@@ -224,6 +232,12 @@ size_t enqueue(const int16_t *buf, size_t samples) {
   return toWrite;
 }
 
+void finish() {
+  portENTER_CRITICAL(&s_mux);
+  s_streamEnded = true;
+  portEXIT_CRITICAL(&s_mux);
+}
+
 void reset() {
   portENTER_CRITICAL(&s_mux);
   s_head = 0;
@@ -235,6 +249,7 @@ void reset() {
   s_dropped = 0;
   s_underruns = 0;
   s_playbackActive = false;
+  s_streamEnded = false;
   portEXIT_CRITICAL(&s_mux);
 }
 
@@ -265,12 +280,13 @@ void logStats() {
   uint32_t dropped = s_dropped;
   uint32_t underruns = s_underruns;
   bool active = s_playbackActive;
+  bool ended = s_streamEnded;
   portEXIT_CRITICAL(&s_mux);
   Serial.printf(
-      "[audio] ring: avail=%u/%u peak=%u pushed=%u drained=%u dropped=%u underruns=%u active=%d\n",
+      "[audio] ring: avail=%u/%u peak=%u pushed=%u drained=%u dropped=%u underruns=%u active=%d ended=%d\n",
       (unsigned)count, (unsigned)kRingSamples, (unsigned)peak,
       (unsigned)pushed, (unsigned)drained, (unsigned)dropped,
-      (unsigned)underruns, active ? 1 : 0);
+      (unsigned)underruns, active ? 1 : 0, ended ? 1 : 0);
 }
 
 void mute() {

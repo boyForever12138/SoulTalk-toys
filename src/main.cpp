@@ -50,6 +50,9 @@ uint32_t s_stateStartedMs = 0;
 uint32_t s_lastAudioRxMs = 0;
 bool s_responseEnded = false;
 
+void sendStatusNow();
+void handleCommand(const JsonDocument &doc);
+
 void setState(AppState s) {
   s_state = s;
   s_stateStartedMs = millis();
@@ -76,10 +79,8 @@ void setState(AppState s) {
       display_ui::setState(display_ui::State::Playing);
       break;
   }
+  sendStatusNow();
 }
-
-void sendStatusNow();
-void handleCommand(const JsonDocument &doc);
 
 bool connectWifi() {
   Serial.printf("[wifi] connecting to %s\n", s_cfg.wifiSsid.c_str());
@@ -169,6 +170,7 @@ void onWsText(const String &json) {
     // Could show response preview
   } else if (!strcmp(type, "end_of_response")) {
     s_responseEnded = true;
+    audio_out::finish();
     if (audio_out::isDrained()) {
       audio_out::mute();
       setState(AppState::Idle);
@@ -251,6 +253,7 @@ void enqueueTestTone(uint32_t durationMs) {
     remaining -= n;
   }
   s_responseEnded = true;
+  audio_out::finish();
   s_lastAudioRxMs = millis();
   setState(AppState::Playing);
 }
