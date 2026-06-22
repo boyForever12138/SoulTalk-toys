@@ -48,10 +48,20 @@ int16_t s_playBuf[AUDIO_FRAME_SAMPLES * 4];
 uint32_t s_lastPairPollMs = 0;
 uint32_t s_stateStartedMs = 0;
 uint32_t s_lastAudioRxMs = 0;
+uint32_t s_recordStartedMs = 0;
+uint32_t s_recordEndedMs = 0;
+uint32_t s_firstAckAudioRxMs = 0;
+uint32_t s_firstRealAudioRxMs = 0;
+uint32_t s_audioRxBytes = 0;
 bool s_responseEnded = false;
+bool s_receivingAckAudio = false;
+bool s_ackAudioDraining = false;
+bool s_metricsPending = false;
 
 void sendStatusNow();
 void handleCommand(const JsonDocument &doc);
+void resetTurnMetrics();
+void sendTurnMetrics(const char *event);
 
 void setState(AppState s) {
   s_state = s;
@@ -167,12 +177,34 @@ void onWsText(const String &json) {
     display_ui::setLine(1, String("> ") + (const char *)(doc["text"] | ""));
     display_ui::render();
   } else if (!strcmp(type, "reply_text")) {
+    s_receivingAckAudio = false;
+    s_ackAudioDraining = false;
     // Could show response preview
+  } else if (!strcmp(type, "ack_audio_start")) {
+    s_receivingAckAudio = true;
+    s_ackAudioDraining = false;
+    s_responseEnded = false;
+    if (s_state == AppState::Waiting || s_state == AppState::Idle) {
+      audio_out::reset();
+      setState(AppState::Playing);
+    }
+    display_ui::setLine(1, "Thinking...");
+    display_ui::render();
+  } else if (!strcmp(type, "ack_audio_end")) {
+    s_receivingAckAudio = false;
+    s_ackAudioDraining = true;
+    audio_out::finish();
   } else if (!strcmp(type, "end_of_response")) {
+    s_receivingAckAudio = false;
+    s_ackAudioDraining = false;
     s_responseEnded = true;
+    s_metricsPending = true;
     audio_out::finish();
     if (audio_out::isDrained()) {
       audio_out::mute();
+      sendTurnMetrics("response_done");
+      s_metricsPending = false;
+      resetTurnMetrics();
       setState(AppState::Idle);
     } else {
       setState(AppState::Playing);
@@ -180,6 +212,10 @@ void onWsText(const String &json) {
   } else if (!strcmp(type, "error")) {
     Serial.printf("[ws] error: %s\n", (const char *)(doc["message"] | "?"));
     audio_out::reset();
+    sendTurnMetrics("response_error");
+    resetTurnMetrics();
+    s_receivingAckAudio = false;
+    s_ackAudioDraining = false;
     setState(AppState::Idle);
   } else if (!strcmp(type, "persona_switched")) {
     int pid = doc["persona_id"] | -1;
@@ -194,12 +230,22 @@ void onWsText(const String &json) {
 void onWsBinary(const uint8_t *data, size_t len) {
   if (s_state == AppState::Waiting || s_state == AppState::Idle)
     setState(AppState::Playing);
+  s_audioRxBytes += len;
+  uint32_t now = millis();
+  if (s_receivingAckAudio) {
+    if (s_firstAckAudioRxMs == 0)
+      s_firstAckAudioRxMs = now;
+  } else {
+    s_ackAudioDraining = false;
+    if (s_firstRealAudioRxMs == 0)
+      s_firstRealAudioRxMs = now;
+  }
   size_t samples = len / 2;
   if (samples > sizeof(s_playBuf) / sizeof(s_playBuf[0]))
     samples = sizeof(s_playBuf) / sizeof(s_playBuf[0]);
   memcpy(s_playBuf, data, samples * 2);
   size_t queued = audio_out::enqueue(s_playBuf, samples);
-  s_lastAudioRxMs = millis();
+  s_lastAudioRxMs = now;
   if (queued < samples) {
     Serial.printf("[audio] output queue accepted %u/%u samples\n",
                   (unsigned)queued, (unsigned)samples);
@@ -231,6 +277,33 @@ void sendStatusNow() {
     return;
   int rssi = WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0;
   ws_client::sendStatus(appStateName(s_state), s_cfg.personaId, rssi, millis());
+}
+
+void resetTurnMetrics() {
+  s_recordStartedMs = 0;
+  s_recordEndedMs = 0;
+  s_firstAckAudioRxMs = 0;
+  s_firstRealAudioRxMs = 0;
+  s_audioRxBytes = 0;
+  s_metricsPending = false;
+}
+
+void sendTurnMetrics(const char *event) {
+  if (!ws_client::isConnected())
+    return;
+  uint32_t recordMs = 0;
+  if (s_recordStartedMs > 0 && s_recordEndedMs >= s_recordStartedMs) {
+    recordMs = s_recordEndedMs - s_recordStartedMs;
+  }
+  int32_t ackMs = -1;
+  if (s_recordEndedMs > 0 && s_firstAckAudioRxMs >= s_recordEndedMs) {
+    ackMs = (int32_t)(s_firstAckAudioRxMs - s_recordEndedMs);
+  }
+  int32_t realMs = -1;
+  if (s_recordEndedMs > 0 && s_firstRealAudioRxMs >= s_recordEndedMs) {
+    realMs = (int32_t)(s_firstRealAudioRxMs - s_recordEndedMs);
+  }
+  ws_client::sendDeviceMetrics(event, recordMs, ackMs, realMs, s_audioRxBytes);
 }
 
 void enqueueTestTone(uint32_t durationMs) {
@@ -339,6 +412,9 @@ void onWsStatus(bool connected) {
   } else {
     audio_out::reset();
     s_responseEnded = false;
+    s_receivingAckAudio = false;
+    s_ackAudioDraining = false;
+    resetTurnMetrics();
     if (s_state != AppState::Connecting)
       setState(AppState::Connecting);
   }
@@ -669,7 +745,11 @@ void loop() {
         Serial.println("[ptt] pressed, starting recording");
         Serial.flush();
         audio_out::reset();
+        resetTurnMetrics();
+        s_recordStartedMs = millis();
         s_responseEnded = false;
+        s_receivingAckAudio = false;
+        s_ackAudioDraining = false;
         ws_client::sendStart(s_cfg.personaId);
         setState(AppState::Recording);
       }
@@ -680,6 +760,7 @@ void loop() {
       if (ev == button::Event::Released || !button::isHeld()) {
         Serial.println("[ptt] released, sending end");
         Serial.flush();
+        s_recordEndedMs = millis();
         ws_client::sendEnd();
         setState(AppState::Waiting);
       }
@@ -690,21 +771,36 @@ void loop() {
         Serial.println("[audio] waiting timeout -> idle");
         audio_out::reset();
         s_responseEnded = false;
+        sendTurnMetrics("waiting_timeout");
+        resetTurnMetrics();
         setState(AppState::Idle);
       }
       break;
     case AppState::Playing:
-      if (s_responseEnded && audio_out::isDrained()) {
+      if (s_ackAudioDraining && !s_responseEnded && audio_out::isDrained()) {
+        audio_out::reset();
+        s_ackAudioDraining = false;
+        setState(AppState::Waiting);
+      } else if (s_responseEnded && audio_out::isDrained()) {
         audio_out::mute();
+        if (s_metricsPending) {
+          sendTurnMetrics("response_done");
+          s_metricsPending = false;
+        }
+        resetTurnMetrics();
         setState(AppState::Idle);
       } else if (!s_responseEnded && audio_out::isDrained() &&
                  (millis() - s_lastAudioRxMs) > AUDIO_PLAYBACK_IDLE_TIMEOUT_MS) {
         Serial.println("[audio] playback idle timeout -> idle");
+        sendTurnMetrics("playback_idle_timeout");
+        resetTurnMetrics();
         setState(AppState::Idle);
       } else if ((millis() - s_stateStartedMs) > AUDIO_WAITING_TIMEOUT_MS) {
         Serial.println("[audio] playback hard timeout -> idle");
         audio_out::reset();
         s_responseEnded = false;
+        sendTurnMetrics("playback_hard_timeout");
+        resetTurnMetrics();
         setState(AppState::Idle);
       }
       break;

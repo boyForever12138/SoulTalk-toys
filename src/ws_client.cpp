@@ -239,6 +239,24 @@ bool sendStatus(const String &state, int personaId, int rssi,
   capabilities["reboot"] = true;
   capabilities["unbind"] = true;
   capabilities["voice_ptt"] = true;
+  capabilities["ack_audio"] = true;
+  capabilities["device_metrics"] = true;
+  return sendJson(doc);
+}
+
+bool sendDeviceMetrics(const String &event, uint32_t recordMs,
+                       int32_t waitToAckAudioMs, int32_t waitToRealAudioMs,
+                       uint32_t audioRxBytes) {
+  JsonDocument doc;
+  doc["type"] = "device_metrics";
+  doc["event"] = event;
+  doc["record_ms"] = recordMs;
+  if (waitToAckAudioMs >= 0)
+    doc["wait_to_ack_audio_ms"] = waitToAckAudioMs;
+  if (waitToRealAudioMs >= 0)
+    doc["wait_to_real_audio_ms"] = waitToRealAudioMs;
+  doc["audio_rx_bytes"] = audioRxBytes;
+  doc["uptime_ms"] = millis();
   return sendJson(doc);
 }
 

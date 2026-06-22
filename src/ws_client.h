@@ -26,4 +26,7 @@ bool sendPing();
 bool sendSetPersona(int personaId);
 bool sendCommandAck(int commandId, bool ok, const String &message = "");
 bool sendStatus(const String &state, int personaId, int rssi, uint32_t uptimeMs);
+bool sendDeviceMetrics(const String &event, uint32_t recordMs,
+                       int32_t waitToAckAudioMs, int32_t waitToRealAudioMs,
+                       uint32_t audioRxBytes);
 }  // namespace ws_client
