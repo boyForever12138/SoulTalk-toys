@@ -66,6 +66,12 @@ void saveWebsocketUrl(const String &url) {
   prefs.putString("wsUrl", url);
 }
 
+void clearDeviceBinding() {
+  prefs.remove("dtoken");
+  prefs.remove("persona");
+  prefs.remove("wsUrl");
+}
+
 void clearWifiAndToken() {
   prefs.clear();
 }

@@ -8,7 +8,7 @@ using TextHandler = std::function<void(const String &json)>;
 using BinaryHandler = std::function<void(const uint8_t *data, size_t len)>;
 using StatusHandler = std::function<void(bool connected)>;
 
-void begin(const String &host, uint16_t port, bool tls,
+void begin(const String &host, uint16_t port, bool tls, const String &path,
            const String &deviceToken);
 void loop();
 bool isConnected();
@@ -24,4 +24,9 @@ bool sendStart(int personaId /* -1 means use device default */);
 bool sendEnd();
 bool sendPing();
 bool sendSetPersona(int personaId);
+bool sendCommandAck(int commandId, bool ok, const String &message = "");
+bool sendStatus(const String &state, int personaId, int rssi, uint32_t uptimeMs);
+bool sendDeviceMetrics(const String &event, uint32_t recordMs,
+                       int32_t waitToAckAudioMs, int32_t waitToRealAudioMs,
+                       uint32_t audioRxBytes);
 }  // namespace ws_client

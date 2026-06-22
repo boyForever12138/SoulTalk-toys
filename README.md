@@ -2,7 +2,8 @@
 
 ESP32-S3 (N16R8) push-to-talk hardware companion for the SoulTalk service.
 Holds a button to talk; audio is streamed to the SoulTalk server, which runs
-ASR -> persona LLM -> TTS and streams synthesized voice back to the device.
+Doubao end-to-end realtime speech and streams synthesized voice back to the
+device.
 
 ## Hardware
 
@@ -61,8 +62,9 @@ pio device monitor # serial @ 115200
 5. **Push-to-talk.**
    - Hold the button: device sends `{type:"start"}` then streams 16-bit LE
      16kHz mono PCM frames.
-   - Release: device sends `{type:"end"}`. Server runs ASR -> LLM -> TTS and
-     streams binary PCM back, which the device plays through MAX98357A.
+   - Release: device sends `{type:"end"}`. Server proxies the turn to Doubao
+     realtime dialogue and streams binary PCM back, which the device plays
+     through MAX98357A.
    - Server emits `{type:"transcript"}`, `{type:"reply_text"}`,
      `{type:"end_of_response"}` as control messages.
 6. **Re-provision.** Long-press PTT for 5 s to wipe NVS and re-enter the
@@ -93,12 +95,10 @@ Three options:
 
 ## Backend dependencies
 
-The SoulTalk server must include the new device endpoints
-(`backend/app/api/devices.py`) and the device migration
-(`backend/alembic/versions/20260602_0017_devices.py`). Set TTS provider via
-`SPEECH_TTS_PROVIDER`/`SPEECH_TTS_API_KEY` in `backend/.env` (mirrors the
-existing ASR provider settings). `ffmpeg` must be installed on the server
-(used to resample TTS output to 16 kHz mono PCM for the device).
+The SoulTalk server must include the device endpoints and Doubao realtime
+dialogue gateway. Configure `DOUBAO_S2S_*` in `soultalk-server/api/.env`.
+The device still sends and receives 16 kHz mono PCM; Volcengine credentials
+stay only on the server.
 
 ## Known caveats
 

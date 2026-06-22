@@ -10,6 +10,32 @@
 #define AUDIO_FRAME_SAMPLES 320
 #define AUDIO_FRAME_BYTES (AUDIO_FRAME_SAMPLES * 2)
 
+// Output playback smoothing. 16 kHz / 16-bit / mono is 32 KB/s, so 3 seconds
+// is 96 KB and fits comfortably in PSRAM on the N16R8 board.
+#ifndef AUDIO_OUT_BUFFER_MS
+#define AUDIO_OUT_BUFFER_MS 3000
+#endif
+
+#ifndef AUDIO_OUT_PREBUFFER_MS
+#define AUDIO_OUT_PREBUFFER_MS 120
+#endif
+
+#ifndef AUDIO_WAITING_TIMEOUT_MS
+#define AUDIO_WAITING_TIMEOUT_MS 45000
+#endif
+
+#ifndef AUDIO_PLAYBACK_IDLE_TIMEOUT_MS
+#define AUDIO_PLAYBACK_IDLE_TIMEOUT_MS 2500
+#endif
+
+#ifndef WS_LOG_BINARY_FRAMES
+#define WS_LOG_BINARY_FRAMES 0
+#endif
+
+#define FIRMWARE_VERSION "0.2.2"
+#define HARDWARE_MODEL "esp32s3-n16r8"
+#define DEVICE_STATUS_INTERVAL_MS 10000
+
 // Provisioning AP
 #define PROV_AP_PREFIX "SoulTalk-"
 #define PROV_AP_PASSWORD ""  // open AP for prototype
