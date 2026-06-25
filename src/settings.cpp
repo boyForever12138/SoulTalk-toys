@@ -54,6 +54,7 @@ void save(const DeviceSettings &s) {
   prefs.putBool("tls", s.tls);
   prefs.putString("dtoken", s.deviceToken);
   prefs.putInt("persona", s.personaId);
+  prefs.putString("wsUrl", s.websocketUrl);
 }
 
 void saveDeviceToken(const String &token) {
@@ -70,6 +71,11 @@ void clearDeviceBinding() {
   prefs.remove("dtoken");
   prefs.remove("persona");
   prefs.remove("wsUrl");
+}
+
+void clearWifiOnly() {
+  prefs.remove("ssid");
+  prefs.remove("pass");
 }
 
 void clearWifiAndToken() {

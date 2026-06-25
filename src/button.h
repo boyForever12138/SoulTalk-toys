@@ -11,5 +11,7 @@ namespace button {
 
     void begin();
     Event poll();
+    Event pollSetup();
     bool isHeld();
+    bool isSetupHeld();
 }

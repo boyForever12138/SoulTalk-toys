@@ -3,55 +3,74 @@
 #include "config.h"
 
 namespace {
-    bool s_lastRaw = true;       // pulled-up = released
-    bool s_stable = true;
-    uint32_t s_lastChangeMs = 0;
-    uint32_t s_pressStartMs = 0;
-    bool s_longFired = false;
+struct ButtonState {
+    bool lastRaw = true;       // pulled-up = released
+    bool stable = true;
+    uint32_t lastChangeMs = 0;
+    uint32_t pressStartMs = 0;
+    bool longFired = false;
+};
+
+ButtonState s_ptt;
+ButtonState s_setup;
+
+button::Event pollPin(uint8_t pin, ButtonState &state) {
+    bool raw = digitalRead(pin);
+    uint32_t now = millis();
+
+    if (raw != state.lastRaw) {
+        state.lastRaw = raw;
+        state.lastChangeMs = now;
+    }
+
+    button::Event ev = button::Event::None;
+    if ((now - state.lastChangeMs) >= BTN_DEBOUNCE_MS &&
+        raw != state.stable) {
+        state.stable = raw;
+        if (state.stable == LOW) {
+            state.pressStartMs = now;
+            state.longFired = false;
+            ev = button::Event::Pressed;
+        } else {
+            ev = button::Event::Released;
+        }
+    }
+
+    if (state.stable == LOW && !state.longFired &&
+        (now - state.pressStartMs) >= BTN_LONGPRESS_MS) {
+        state.longFired = true;
+        ev = button::Event::LongPress;
+    }
+
+    return ev;
+}
 }
 
 namespace button {
 
 void begin() {
     pinMode(PIN_BUTTON_PTT, INPUT_PULLUP);
-    s_lastRaw = digitalRead(PIN_BUTTON_PTT);
-    s_stable = s_lastRaw;
+    pinMode(PIN_BUTTON_SETUP, INPUT_PULLUP);
+    s_ptt.lastRaw = digitalRead(PIN_BUTTON_PTT);
+    s_ptt.stable = s_ptt.lastRaw;
+    s_setup.lastRaw = digitalRead(PIN_BUTTON_SETUP);
+    s_setup.stable = s_setup.lastRaw;
 }
 
 Event poll() {
-    bool raw = digitalRead(PIN_BUTTON_PTT);
-    uint32_t now = millis();
+    return pollPin(PIN_BUTTON_PTT, s_ptt);
+}
 
-    if (raw != s_lastRaw) {
-        s_lastRaw = raw;
-        s_lastChangeMs = now;
-    }
-
-    Event ev = Event::None;
-    if ((now - s_lastChangeMs) >= BTN_DEBOUNCE_MS && raw != s_stable) {
-        s_stable = raw;
-        if (s_stable == LOW) {
-            // pressed
-            s_pressStartMs = now;
-            s_longFired = false;
-            ev = Event::Pressed;
-        } else {
-            // released
-            ev = Event::Released;
-        }
-    }
-
-    if (s_stable == LOW && !s_longFired &&
-        (now - s_pressStartMs) >= BTN_LONGPRESS_MS) {
-        s_longFired = true;
-        ev = Event::LongPress;
-    }
-
-    return ev;
+Event pollSetup() {
+    return pollPin(PIN_BUTTON_SETUP, s_setup);
 }
 
 bool isHeld() {
-    return s_stable == LOW;
+    return s_ptt.stable == LOW;
+}
+
+bool isSetupHeld() {
+    return s_setup.stable == LOW;
 }
 
 } // namespace

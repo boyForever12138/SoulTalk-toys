@@ -77,7 +77,7 @@ RegisterResult registerDevice(const String &deviceId, const String &name) {
 }
 
 MeResult getMe() {
-  MeResult out{false, false, -1, "", "", {}, ""};
+  MeResult out{false, 0, false, -1, "", "", {}, ""};
   HTTPClient http;
   if (!beginRequest(http, API_PATH_ME)) {
     out.error = "begin failed";
@@ -85,6 +85,7 @@ MeResult getMe() {
   }
   http.addHeader("Authorization", "Bearer " + s_token);
   int code = http.GET();
+  out.statusCode = code;
   String resp = http.getString();
   http.end();
   if (code != 200) {

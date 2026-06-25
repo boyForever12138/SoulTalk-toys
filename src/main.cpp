@@ -3,14 +3,14 @@
 // Boot states:
 //   Boot -> Provision (no WiFi config) -> reboots
 //   Boot -> Connecting (WiFi STA)
-//      -> Pairing (no token, or token unpaired) ; OLED shows 6-char code,
-//         device polls /api/devices/me until paired
+//      -> Pairing (no token, token rejected, or token unpaired) ; OLED shows
+//         6-char code, device polls /api/devices/me until paired
 //      -> WS Connect -> Idle
 //
 // Runtime:
 //   Idle -> Recording (PTT down) -> Waiting (PTT up, send {type:end})
 //   Waiting -> Playing (binary frames) -> Idle ({type:end_of_response})
-//   Idle -> wipe NVS + reboot (long-press 5s)
+//   Setup button long-press -> clear WiFi only + reboot to provisioning
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -62,6 +62,22 @@ void sendStatusNow();
 void handleCommand(const JsonDocument &doc);
 void resetTurnMetrics();
 void sendTurnMetrics(const char *event);
+void rebootToWifiProvisioning();
+void delayWithSetupButton(uint32_t durationMs);
+
+const char *buttonEventName(button::Event ev) {
+  switch (ev) {
+    case button::Event::Pressed:
+      return "Pressed";
+    case button::Event::Released:
+      return "Released";
+    case button::Event::LongPress:
+      return "LongPress";
+    case button::Event::None:
+    default:
+      return "?";
+  }
+}
 
 void setState(AppState s) {
   s_state = s;
@@ -98,6 +114,9 @@ bool connectWifi() {
   WiFi.begin(s_cfg.wifiSsid.c_str(), s_cfg.wifiPass.c_str());
   uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED && (millis() - start) < 20000) {
+    if (button::pollSetup() == button::Event::LongPress) {
+      rebootToWifiProvisioning();
+    }
     delay(200);
   }
   if (WiFi.status() != WL_CONNECTED)
@@ -105,6 +124,32 @@ bool connectWifi() {
   Serial.printf("[wifi] OK ip=%s rssi=%d\n", WiFi.localIP().toString().c_str(),
                 WiFi.RSSI());
   return true;
+}
+
+bool isRejectedDeviceToken(int statusCode) {
+  return statusCode == 401 || statusCode == 403 || statusCode == 404 ||
+         statusCode == 410;
+}
+
+void rebootToWifiProvisioning() {
+  Serial.println("[setup] long press -> wifi reprovision");
+  display_ui::setLine(0, "WiFi Setup");
+  display_ui::setLine(1, "Rebooting...");
+  display_ui::render();
+  Serial.flush();
+  settings::clearWifiOnly();
+  delay(250);
+  ESP.restart();
+}
+
+void delayWithSetupButton(uint32_t durationMs) {
+  uint32_t start = millis();
+  while ((millis() - start) < durationMs) {
+    if (button::pollSetup() == button::Event::LongPress) {
+      rebootToWifiProvisioning();
+    }
+    delay(20);
+  }
 }
 
 // Always (re)register on boot when not yet paired so the OLED always shows
@@ -564,7 +609,7 @@ void setup() {
     Serial.flush();
     display_ui::setLine(1, "WiFi failed");
     display_ui::render();
-    delay(2000);
+    delayWithSetupButton(2000);
     ESP.restart();
   }
   Serial.println("[init] WiFi connected");
@@ -575,43 +620,59 @@ void setup() {
   Serial.flush();
   setState(AppState::Pairing);
   bool alreadyPaired = false;
+  bool shouldRegister = s_cfg.deviceToken.length() == 0;
   if (s_cfg.deviceToken.length()) {
     Serial.println("[init] Has token, polling /me...");
     Serial.flush();
     api_client::MeResult me = api_client::getMe();
-    Serial.printf("[init] /me response: ok=%d paired=%d\n", me.ok, me.paired);
+    Serial.printf("[init] /me response: ok=%d status=%d paired=%d err=%s\n",
+                  me.ok, me.statusCode, me.paired, me.error.c_str());
     Serial.flush();
-    alreadyPaired = me.ok && me.paired;
-    if (alreadyPaired) {
-      if (me.personaId >= 0) {
-        s_cfg.personaId = me.personaId;
-        settings::savePersonaId(me.personaId);
-      } else if (!me.personas.empty()) {
-        // No persona selected yet, auto-pick the first available one
-        int firstId = me.personas[0].id;
-        Serial.printf("[init] No persona set, auto-selecting #%d (%s)\n",
-                      firstId, me.personas[0].name.c_str());
-        Serial.flush();
-        if (api_client::setPersona(firstId)) {
-          s_cfg.personaId = firstId;
-          settings::savePersonaId(firstId);
+    if (me.ok) {
+      alreadyPaired = me.paired;
+      shouldRegister = !me.paired;
+      if (alreadyPaired) {
+        if (me.personaId >= 0) {
+          s_cfg.personaId = me.personaId;
+          settings::savePersonaId(me.personaId);
+        } else if (!me.personas.empty()) {
+          // No persona selected yet, auto-pick the first available one
+          int firstId = me.personas[0].id;
+          Serial.printf("[init] No persona set, auto-selecting #%d (%s)\n",
+                        firstId, me.personas[0].name.c_str());
+          Serial.flush();
+          if (api_client::setPersona(firstId)) {
+            s_cfg.personaId = firstId;
+            settings::savePersonaId(firstId);
+          }
+        }
+        // Store websocket URL for later use
+        if (me.websocketUrl.length() > 0) {
+          s_cfg.websocketUrl = me.websocketUrl;
+          settings::saveWebsocketUrl(me.websocketUrl);
+          Serial.printf("[init] Got websocket URL: %s\n",
+                        me.websocketUrl.c_str());
+          Serial.flush();
         }
       }
-      // Store websocket URL for later use
-      if (me.websocketUrl.length() > 0) {
-        s_cfg.websocketUrl = me.websocketUrl;
-        settings::saveWebsocketUrl(me.websocketUrl);
-        Serial.printf("[init] Got websocket URL: %s\n",
-                      me.websocketUrl.c_str());
-        Serial.flush();
-      }
+    } else if (isRejectedDeviceToken(me.statusCode)) {
+      Serial.println("[init] Stored token rejected by server, will register");
+      Serial.flush();
+      shouldRegister = true;
+    } else {
+      Serial.println("[init] /me failed without token rejection; preserving token");
+      Serial.flush();
+      display_ui::setLine(1, "Server fail");
+      display_ui::render();
+      delayWithSetupButton(5000);
+      ESP.restart();
     }
   } else {
     Serial.println("[init] No token, will register");
     Serial.flush();
   }
 
-  if (!alreadyPaired) {
+  if (shouldRegister) {
     Serial.println("[init] Not paired, registering...");
     Serial.flush();
     if (!refreshRegistration()) {
@@ -619,7 +680,7 @@ void setup() {
       Serial.flush();
       display_ui::setLine(1, "Register fail");
       display_ui::render();
-      delay(3000);
+      delayWithSetupButton(3000);
       ESP.restart();
     }
     Serial.println("[init] Registered, polling for pair...");
@@ -627,7 +688,7 @@ void setup() {
     while (!pollPaired()) {
       Serial.println("[init] Still waiting for pair...");
       Serial.flush();
-      delay(PAIR_POLL_INTERVAL_MS);
+      delayWithSetupButton(PAIR_POLL_INTERVAL_MS);
       button::Event ev = button::poll();
       if (ev == button::Event::LongPress) {
         // Long press during pairing: refresh pair code (it may have expired)
@@ -715,28 +776,31 @@ void loop() {
     s_lastStatusMs = millis();
   }
 
+  button::Event setupEv = button::pollSetup();
   button::Event ev = button::poll();
 
   // Surface button events on the OLED for user feedback
-  if (ev != button::Event::None) {
-    const char *evName = ev == button::Event::Pressed     ? "Pressed"
-                         : ev == button::Event::Released  ? "Released"
-                         : ev == button::Event::LongPress ? "LongPress"
-                                                          : "?";
+  if (setupEv != button::Event::None) {
     display_ui::setLine(1, (s_state == AppState::Waiting ||
-                            s_state == AppState::Playing)
+                            s_state == AppState::Playing ||
+                            s_state == AppState::Recording)
                                ? "Busy"
-                               : String("BTN: ") + evName);
+                               : String("SETUP: ") + buttonEventName(setupEv));
     display_ui::render();
   }
 
-  // Only allow long press to wipe & reboot when in Idle state
-  // This prevents accidental reset during connection/pairing
-  if (ev == button::Event::LongPress && s_state == AppState::Idle) {
-    Serial.println("[btn] long press -> wipe & reboot");
-    Serial.flush();
-    settings::clearWifiAndToken();
-    ESP.restart();
+  if (ev != button::Event::None) {
+    display_ui::setLine(1, (s_state == AppState::Waiting ||
+                            s_state == AppState::Playing)
+                               ? "Busy"
+                               : String("PTT: ") + buttonEventName(ev));
+    display_ui::render();
+  }
+
+  // Only allow the dedicated Setup button to re-provision WiFi.
+  // Device binding is preserved; unbind is a separate server command.
+  if (setupEv == button::Event::LongPress && s_state == AppState::Idle) {
+    rebootToWifiProvisioning();
   }
 
   switch (s_state) {

@@ -11,7 +11,7 @@ device.
 - Mic: INMP441 (I2S)
 - Speaker amp: MAX98357A (I2S)
 - Display: 0.91" SSD1306 OLED (I2C, 128x32)
-- Button: tactile switch (PTT)
+- Buttons: tactile switch (PTT), tactile switch (Setup/WiFi)
 
 ### Wiring
 
@@ -29,8 +29,10 @@ device.
 | OLED | SCL | 2 |
 | OLED | SDA | 42 |
 | OLED | VCC | 3.3V |
-| Button | one leg | GPIO 7 |
-| Button | other leg | GND |
+| PTT button | one leg | GPIO 7 |
+| PTT button | other leg | GND |
+| Setup/WiFi button | one leg | GPIO 8 |
+| Setup/WiFi button | other leg | GND |
 
 All GNDs tied together.
 
@@ -49,10 +51,11 @@ pio device monitor # serial @ 115200
    `host:port` (+ TLS toggle). Defaults are
    `soultalk.kunpenglingjing.cn:443` with TLS on, so for the production
    service you can leave them untouched. Save and the device reboots.
-2. **WiFi connect.** As soon as STA is up the device calls
-   `POST <host>/api/devices/register {device_id}`, stores the long-lived
-   bearer device token in NVS, and immediately displays the freshly
-   issued **6-character pair code** on the OLED.
+2. **WiFi connect.** As soon as STA is up, a bound device first checks
+   `GET <host>/api/devices/me` with its stored bearer device token. If the
+   token is valid, it keeps the existing account/persona binding and goes
+   straight to voice mode. A new or server-rejected device registers and
+   displays a freshly issued **6-character pair code** on the OLED.
 3. **Pairing on the web.** Open
    `https://soultalk.kunpenglingjing.cn/devices/pair`
    on any browser while logged in to your SoulTalk account. Enter the code
@@ -60,23 +63,25 @@ pio device monitor # serial @ 115200
 4. **Voice WebSocket.** Once paired, the device opens
    `WSS <host>/api/devices/voice?token=<device_token>`.
 5. **Push-to-talk.**
-   - Hold the button: device sends `{type:"start"}` then streams 16-bit LE
+   - Hold the PTT button: device sends `{type:"start"}` then streams 16-bit LE
      16kHz mono PCM frames.
    - Release: device sends `{type:"end"}`. Server proxies the turn to Doubao
      realtime dialogue and streams binary PCM back, which the device plays
      through MAX98357A.
    - Server emits `{type:"transcript"}`, `{type:"reply_text"}`,
      `{type:"end_of_response"}` as control messages.
-6. **Re-provision.** Long-press PTT for 5 s to wipe NVS and re-enter the
-   captive portal. A fresh pair code is issued on every cold boot until
-   the device is bound to an account.
+6. **Re-provision WiFi.** Long-press the dedicated Setup/WiFi button for 5 s
+   to clear only the saved WiFi credentials and re-enter the captive portal.
+   The PTT button only controls voice recording. The device token, persona,
+   and WebSocket URL are preserved, so changing WiFi or using a phone hotspot
+   does not require rebinding the device.
 
 ## Switching persona
 
 Three options:
 
 - During pairing on the web form (default).
-- Re-open the pair page anytime: rebinding overwrites the persona.
+- Change the default persona from the SoulTalk device management page.
 - Programmatically: send `{"type":"set_persona","persona_id":<id>}` over the
   voice WebSocket. (UI for this on the device is left as future work --
   could use button + OLED menu.)

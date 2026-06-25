@@ -6,7 +6,7 @@ uses Doubao end-to-end realtime speech for device calls.
 ## Runtime Flow
 
 ```text
-ESP32-S3 button/mic
+ESP32-S3 PTT button/mic
   -> WSS /api/devices/voice?token=<device_token>
 SoulTalk server
   -> Doubao realtime dialogue
@@ -74,16 +74,22 @@ pio device monitor
 
 1. First boot opens the provisioning portal.
 2. Configure WiFi and SoulTalk server host.
-3. The OLED shows a 6-character pair code.
-4. Pair the device in the SoulTalk web UI.
-5. When OLED shows `Ready`, hold the button to talk.
-6. Release the button to submit the turn.
-7. The device plays streamed PCM audio and returns to `Ready`.
+3. If the device is already bound, it keeps the existing account binding after
+   WiFi changes and goes back to `Ready`.
+4. If the device is new, explicitly unbound, or its token is rejected by the
+   server, the OLED shows a 6-character pair code.
+5. Pair the device in the SoulTalk web UI.
+6. When OLED shows `Ready`, hold the PTT button to talk.
+7. Release the button to submit the turn.
+8. The device plays streamed PCM audio and returns to `Ready`.
+9. To change WiFi, long-press the dedicated Setup/WiFi button for 5 seconds.
+   This preserves the device account binding.
 
 ## Troubleshooting
 
 - `Doubao S2S is not configured`: server `.env` is missing `DOUBAO_S2S_*`.
 - Device connects but no audio: confirm Doubao output is `pcm_s16le` 16 kHz.
 - WebSocket fails online: bypass CDN for `/api/devices/voice`.
-- Pair code keeps changing: the device is not paired yet; every registration
-  rotates the unpaired token and code.
+- Pair code appears after WiFi changes: the server rejected the stored device
+  token, or the device was explicitly unbound. Normal WiFi re-provisioning
+  preserves the token and should not require rebinding.

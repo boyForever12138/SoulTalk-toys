@@ -18,3 +18,6 @@
 
 // PTT button: GPIO7 -> GND, with internal pull-up
 #define PIN_BUTTON_PTT     7
+
+// Setup/WiFi button: GPIO8 -> GND, with internal pull-up
+#define PIN_BUTTON_SETUP   8

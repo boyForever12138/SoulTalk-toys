@@ -23,6 +23,7 @@ void saveDeviceToken(const String &token);
 void savePersonaId(int32_t id);
 void saveWebsocketUrl(const String &url);
 void clearDeviceBinding();
+void clearWifiOnly();
 void clearWifiAndToken();
 bool hasWifi();
 String deviceId();  // MAC-based stable ID

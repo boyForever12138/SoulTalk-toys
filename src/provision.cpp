@@ -45,10 +45,11 @@ button{margin-top:1em;padding:.7em 1.2em;font-size:1em;width:100%}
   </div>
   <button type="submit">Save & Reboot</button>
 </form>
-<p class="note">After reboot, the device will register with the server and show
-a 6-character pairing code on its screen. Open
-<code>http(s)://&lt;host&gt;:&lt;port&gt;/api/devices/pair</code> while
-logged in to SoulTalk to bind the device and pick a persona.</p>
+<p class="note">After reboot, an already-bound device keeps its SoulTalk account
+binding and reconnects on the new WiFi. A pairing code is shown only for a new,
+unbound, or server-rejected device token.</p>
+<p class="note">For a new device, open SoulTalk device management while logged
+in and enter the 6-character pairing code shown on the device screen.</p>
 <p class="note">Device ID: %DID%</p>
 </body></html>
 )HTML";
@@ -73,9 +74,6 @@ void handleSave() {
   s.host = s_server.arg("host");
   s.port = (uint16_t)s_server.arg("port").toInt();
   s.tls = s_server.arg("tls") == "1";
-  // Reset device token + persona on reconfig: server identity may have changed
-  s.deviceToken = "";
-  s.personaId = -1;
 
   if (s.wifiSsid.length() == 0 || s.host.length() == 0) {
     s_server.send(400, "text/plain", "Missing required fields");

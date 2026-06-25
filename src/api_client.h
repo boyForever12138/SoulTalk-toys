@@ -20,6 +20,7 @@ struct PersonaInfo {
 
 struct MeResult {
   bool ok;
+  int statusCode;
   bool paired;
   int personaId;  // -1 if none
   String personaName;
