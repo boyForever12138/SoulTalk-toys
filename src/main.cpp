@@ -605,12 +605,13 @@ void setup() {
   Serial.println("[init] Connecting WiFi...");
   Serial.flush();
   if (!connectWifi()) {
-    Serial.println("[init] WiFi failed, restarting in 2s");
+    Serial.println("[init] WiFi failed, switching to provisioning portal");
     Serial.flush();
     display_ui::setLine(1, "WiFi failed");
     display_ui::render();
-    delayWithSetupButton(2000);
-    ESP.restart();
+    delay(1200);
+    settings::clearWifiOnly();
+    provision::runPortal();  // never returns (reboots after save)
   }
   Serial.println("[init] WiFi connected");
   Serial.flush();
